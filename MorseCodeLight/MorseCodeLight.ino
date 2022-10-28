@@ -63,7 +63,7 @@ class DynamicScaling {
 /*****************************************************/
 /*             Morse Detection Class                 */
 /*****************************************************/
-/* */
+/* In charge of detecting incoming signals           */
 class MorseDetector {
   // need to check if light state changes
   // need to know if it was long or short
