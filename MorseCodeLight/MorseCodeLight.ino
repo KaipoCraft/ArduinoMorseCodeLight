@@ -1,6 +1,6 @@
 /* 
  * Purpose:
- *  Build code to translate morse code in light into English (or control something else on command)
+ *  Build code to translate morse code light flashes into English
  *  
  * Required hardware
  *  Arduino
@@ -8,48 +8,164 @@
  *  morse code light source
  *  
  *  created October 27, 2022
- *  by Neill Shikada
+ *  by Neill Shikada & Dennis :)
 */
 
 // include chrono to track length of time of incoming flashes
 #include <Chrono.h>
-// include EasyMorse for translation of the message into English
-#include <EasyMorse.h>
 
 /*****************************************************/
 /*          Set variables for the sensor             */
 /*****************************************************/
 
-// variable to indicate the high value of light
-int sensorHigh = 900;
-// variable to indicate the low value of light
-int sensorLow = 800;
-// variable to hold the values of the photoresistor
+/* variable to set the dit unit lengths
+ *  Morse code is defined by the length of dits
+ dit = 1 unit; dah = 3 units; word-space = 7 units */
+const int DIT_LENGTH = 100;   // defined in milliseconds
+const int DAH_LENGTH = DIT_LENGTH*3;
+const int INTER_WORD_LENGTH = DIT_LENGTH*7;
+const int INTER_CHAR_LENGTH = DIT_LENGTH*3;
+const int INTRA_CHAR_LENGTH = DIT_LENGTH;
+/* variable to control how sensitive the sensor is to morse */
+const int BUFFER = DIT_LENGTH/2;
+
+/* variable to indicate the high value of light */
+int sensorHigh = 901;
+/* variable to indicate the low value of light */
+int sensorLow = 900;
+/* variable to hold the values of the photoresistor */
 int sensorValue;
 
-// variable for the gap between signals
-const int gap = 100;
-// Set the pin for the photo resistor
+/* Set the pin for the photo resistor */
 const int photoPin = A0;
-// set the length of light to detect and gap size
-const int UNIT_LENGTH = 100;
-const int BUFFER_SIZE = 5;
 
-// boolean to see if light is on (default = false)
+/* boolean to see if light is on (default = false) */
 bool lightState = false;
 bool prevLightState = false;
 
-// create an instance of chrono to track the time
-Chrono chrono;
-// create an instance of easy morse to translate the code
-EasyMorse morse;
+/* String variables to hold the morse code and corresponding message in Ascii */
+String message = "";
+String morse = "";
 
+/* create an instance of chrono to track the time */
+Chrono chrono;
+
+/* set LED output pins for testing */
+int LED_PIN1 = 3;
+int LED_PIN2 = 4;
+int LED_PIN3 = 5;
+
+/*****************************************************/
+/*              Morse Library Class                  */
+/*****************************************************/
+/* Reference for the morse translation               */
+class MorseLibrary {
+
+  /* array of all the letters and numbers to use with the code */
+  char AsciiLibrary[36] = {
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 
+    'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 
+    'U', 'V', 'W', 'X', 'Y', 'Z', '1', '2', '3', '4', 
+    '5', '6', '7', '8', '9', '0'
+  };
+  /* corresponding array of morse codes that match the order of the AsciiLibrary */
+  String MorseLibrary[36] = {
+    ".-", "-...", "-.-.", "-..", ".", "..-.", "--.", 
+    "....", "..", ".---", "-.-", ".-..", "----", "-.", 
+    "---", ".--.", "--.-", ".-.", "...", "-", "..-", 
+    "...-", ".--", "-..-", "-.--", "--..", ".----", 
+    "..---", "...--", "....-", ".....", "-....", 
+    "--...", "---..", "----.", "-----"
+  };
+    
+  public:
+    /* translate takes an input string of dots, dashes, and spaces and converts them into Ascii */
+    char translate(String code) {
+      // Serial.print(code);
+      for (int i = 0; i < sizeof(MorseLibrary); i++) {
+        if (code == MorseLibrary[i]) {
+          return AsciiLibrary[i];
+          break;
+        }
+      }
+      return '!';
+    };
+};
 
 /*****************************************************/
 /*              Morse Decoder Class                  */
 /*****************************************************/
 /* Translates the incoming code to English           */
 class MorseDecoder {
+  MorseLibrary ml;
+  
+  public:
+    /* readLight checks the incoming light patterns to determine if it's a dit or dah, otherwise it'll print "!" */
+    void readLight() {
+      int timer = chrono.elapsed();
+      
+      // checks the length of time to see if it roughly matches the dits, dahs, etc.
+      if (timer > DAH_LENGTH - BUFFER && timer < DAH_LENGTH + BUFFER) {
+        morse += "-";                         // adds a "-" to the morse code string
+        chrono.restart();                     // restart the listening timer
+      } else if (timer > DIT_LENGTH - BUFFER && timer < DIT_LENGTH + BUFFER) {
+        morse += ".";                         // adds a "." to the morse code string
+        chrono.restart();                     // restart the listening timer
+      } else {
+        Serial.print("!");                    // if the timing didn't match, print "!" to the serial
+        chrono.restart();                     // restart the listening timer
+      }
+    }
+
+    /* readDark checks the timing between light patterns to determine if it's an inter character, intra character, or inter word break, otherwise it prints "!" */
+    void readDark() {
+      int timer = chrono.elapsed();
+      // checks the length of time to see if it roughly matches the dits, dahs, etc.
+      if (timer > INTER_WORD_LENGTH - BUFFER && timer < INTER_WORD_LENGTH + BUFFER) {
+        
+        nextWord();                           // runs the function to process the full word into Ascii
+        
+      } else if (timer > INTRA_CHAR_LENGTH - BUFFER && timer < INTRA_CHAR_LENGTH + BUFFER) {
+        
+        chrono.restart();                     // restart the listening timer
+        
+      } else if (timer > INTER_CHAR_LENGTH - BUFFER && timer < INTER_CHAR_LENGTH + BUFFER) {
+        
+        message += ml.translate(morse);       // add the latest morse code character to the word
+        morse = "";                           // clears the morse String to prepare for the next character
+        chrono.restart();                     // restart the listening timer
+        
+      } else {
+
+        Serial.print("!");
+        chrono.restart();                     // restart the listening timer
+        
+      }
+    }
+
+    void nextWord() {
+      
+        digitalWrite(LED_PIN1, LOW);          // resets the LEDs so they can check again for the incoming word
+        digitalWrite(LED_PIN2, LOW);
+        digitalWrite(LED_PIN3, LOW);
+        
+        message += ml.translate(morse);       // add the latest morse code character to the word
+        message += " ";                       // adds a space after the word so there's a space between this and the next one
+        morse = "";                           // clears the morse String to prepare for the next character
+        chrono.restart();                     // restarts the listening timer
+
+        if (message == "KAIPO ") {                // checks for if the message matches "M "
+          digitalWrite(LED_PIN1, HIGH);       // turns on an LED that corresponds to "M "
+        } else if (message == "PARIS ") {     // checks for if the message matches "PARIS "
+          digitalWrite(LED_PIN2, HIGH);       // turns on an LED that corresponds to "PARIS "
+        } else if (message == "K ") {         // checks for if the message matches "K "
+          digitalWrite(LED_PIN3, HIGH);       // turns on an LED that corresponds to "K "
+        }
+        
+        Serial.print(message);                // prints the message to the serial
+        message = "";                         // resets the message to prepare for the next incoming word
+        
+    }
 };
 
 /*****************************************************/
@@ -60,41 +176,6 @@ class MorseDecoder {
 class DynamicScaling {
 };
 
-/*****************************************************/
-/*             Morse Detection Class                 */
-/*****************************************************/
-/* In charge of detecting incoming signals           */
-class MorseDetector {
-  // need to check if light state changes
-  // need to know if it was long or short
-  // 3 results : dot, dash, gap
-  
-  public:
-    String detect() {
-      
-      if (lightState != prevLightState) {
-//         Serial.print(chrono.elapsed());
-//         Serial.println(" ms");
-          if (chrono.elapsed() > gap*2) {
-            chrono.restart();
-            morse.push(2);
-            Serial.print("dah");
-            return "dah";
-          } else if (chrono.elapsed() > gap) {
-            chrono.restart();
-            morse.push(1);
-            Serial.print("dit");
-            return "dit";
-          } else {
-            chrono.restart();
-            Serial.println(morse.getCharAscii());
-            morse.clear();
-            return " ";
-          };
-          chrono.restart();
-      } else return "";
-    };
-};
 
 /*****************************************************/
 /*                Setup Function                     */
@@ -102,26 +183,39 @@ class MorseDetector {
 void setup() {
   // set the baud rate
   Serial.begin(9600);
+  // start the listening timer
+  chrono.restart();
 }
 
 /*****************************************************/
-/*                Loop Function                     */
+/*                 Loop Function                     */
 /*****************************************************/
 void loop() {
-  MorseDetector md;
-  // TODO figure out how to know when to stop and translate. Gap?
-  md.detect();
-  prevLightState = lightState;
-  
+  MorseDecoder md;
   
   // reads the photoresistor data and assigns it to sensorValue
   sensorValue = analogRead(photoPin);
+  //  Serial.println(sensorValue);
 
+  /* if the light passes the threshold for being on, set lightState to true
+   * if it doesn't, set it to false */
   if (sensorValue > sensorHigh) {
     lightState = true;
   } else if (sensorValue < sensorLow) {
     lightState = false;
   }
+
+  /* if the light changed and just turned on, then read the darkness between characters
+   * if the light changed and just turned off, then read the light for characters */
+  if (lightState != prevLightState && lightState == true) {
+    md.readDark();
+  } else if (lightState != prevLightState && lightState == false) {
+    md.readLight();
+  } else if (chrono.elapsed() == INTER_WORD_LENGTH*1.5) {
+    if (message != "") {
+      md.nextWord();    // if we haven't heard a signal in a bit and have a message, run the function to process the full word into Ascii
+    }
+  }
   
-//  Serial.println(sensorValue);
+  prevLightState = lightState;
 }
