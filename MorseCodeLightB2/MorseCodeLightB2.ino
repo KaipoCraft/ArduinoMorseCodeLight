@@ -33,6 +33,8 @@ const int BUFFER = DIT_LENGTH/2;
 int sensorHigh = 901;
 /* variable to indicate the low value of light */
 int sensorLow = 900;
+/* threshold for the sensor to register a flash */
+int sensorThreshold = 900;
 /* variable to hold the values of the photoresistor */
 int sensorValue;
 
@@ -48,12 +50,13 @@ String message = "";
 String morse = "";
 
 /* create an instance of chrono to track the time */
-Chrono chrono;
+Chrono timer;
 
 /* set LED output pins for testing */
-int LED_PIN1 = 3;
-int LED_PIN2 = 4;
-int LED_PIN3 = 5;
+int OUTPUT_PIN1 = 13;
+int OUTPUT_PIN2 = 14;
+int OUTPUT_PIN3 = 15;
+
 
 /*****************************************************/
 /*              Morse Library Class                  */
@@ -86,6 +89,8 @@ class MorseLibrary {
         if (code == MorseLibrary[i]) {
           return AsciiLibrary[i];
           break;
+        } else {
+//          Serial.print("Null");
         }
       }
       return '!';
@@ -102,64 +107,69 @@ class MorseDecoder {
   public:
     /* readLight checks the incoming light patterns to determine if it's a dit or dah, otherwise it'll print "!" */
     void readLight() {
-      int timer = chrono.elapsed();
       
       // checks the length of time to see if it roughly matches the dits, dahs, etc.
-      if (timer > DAH_LENGTH - BUFFER && timer < DAH_LENGTH + BUFFER) {
+      if (timer.elapsed() > DAH_LENGTH - BUFFER && timer.elapsed() < DAH_LENGTH + BUFFER) {
         morse += "-";                         // adds a "-" to the morse code string
-        chrono.restart();                     // restart the listening timer
-      } else if (timer > DIT_LENGTH - BUFFER && timer < DIT_LENGTH + BUFFER) {
+        timer.restart();
+      } else if (timer.elapsed() > DIT_LENGTH - BUFFER && timer.elapsed() < DIT_LENGTH + BUFFER) {
         morse += ".";                         // adds a "." to the morse code string
-        chrono.restart();                     // restart the listening timer
+        timer.restart();
       } else {
-        Serial.print("!");                    // if the timing didn't match, print "!" to the serial
-        chrono.restart();                     // restart the listening timer
+//        Serial.println("null");
+//        Serial.println(t);
       }
+
+//      timer.restart();
     }
 
     /* readDark checks the timing between light patterns to determine if it's an inter character, intra character, or inter word break, otherwise it prints "!" */
     void readDark() {
-      int timer = chrono.elapsed();
+
       // checks the length of time to see if it roughly matches the dits, dahs, etc.
-      if (timer > INTER_WORD_LENGTH - BUFFER && timer < INTER_WORD_LENGTH + BUFFER) {
+      if (timer.elapsed() > INTER_WORD_LENGTH - BUFFER && timer.elapsed() < INTER_WORD_LENGTH + BUFFER) {
         
         nextWord();                           // runs the function to process the full word into Ascii
+        timer.restart();
         
-      } else if (timer > INTRA_CHAR_LENGTH - BUFFER && timer < INTRA_CHAR_LENGTH + BUFFER) {
+      } else if (timer.elapsed() > INTRA_CHAR_LENGTH - BUFFER && timer.elapsed() < INTRA_CHAR_LENGTH + BUFFER) {
         
-        chrono.restart();                     // restart the listening timer
-        
-      } else if (timer > INTER_CHAR_LENGTH - BUFFER && timer < INTER_CHAR_LENGTH + BUFFER) {
+        timer.restart();
+      
+      } else if (timer.elapsed() > INTER_CHAR_LENGTH - BUFFER && timer.elapsed() < INTER_CHAR_LENGTH + BUFFER) {
         
         message += ml.translate(morse);       // add the latest morse code character to the word
+        Serial.print(morse);
         morse = "";                           // clears the morse String to prepare for the next character
-        chrono.restart();                     // restart the listening timer
-        
-      } else {
+        timer.restart();
+      
+      } else if (timer.elapsed() == INTER_WORD_LENGTH * 1.5) {
 
-        Serial.print("!");
-        chrono.restart();                     // restart the listening timer
+        nextWord();
         
       }
+
     }
 
     void nextWord() {
       
-        digitalWrite(LED_PIN1, LOW);          // resets the LEDs so they can check again for the incoming word
-        digitalWrite(LED_PIN2, LOW);
-        digitalWrite(LED_PIN3, LOW);
+        digitalWrite(OUTPUT_PIN1, LOW);          // resets the LEDs so they can check again for the incoming word
+        digitalWrite(OUTPUT_PIN2, LOW);
+        digitalWrite(OUTPUT_PIN3, LOW);
         
         message += ml.translate(morse);       // add the latest morse code character to the word
         message += " ";                       // adds a space after the word so there's a space between this and the next one
         morse = "";                           // clears the morse String to prepare for the next character
-        chrono.restart();                     // restarts the listening timer
 
-        if (message == "KAIPO ") {                // checks for if the message matches "M "
-          digitalWrite(LED_PIN1, HIGH);       // turns on an LED that corresponds to "M "
-        } else if (message == "PARIS ") {     // checks for if the message matches "PARIS "
-          digitalWrite(LED_PIN2, HIGH);       // turns on an LED that corresponds to "PARIS "
-        } else if (message == "K ") {         // checks for if the message matches "K "
-          digitalWrite(LED_PIN3, HIGH);       // turns on an LED that corresponds to "K "
+        if (message == "BAD ") {                // checks for if the message matches "BAD "
+          digitalWrite(OUTPUT_PIN1, HIGH);       // turns on an LED that corresponds to "BAD "
+          Serial.println("shit");
+        } else if (message == "GOOD ") {     // checks for if the message matches "PA "
+          digitalWrite(OUTPUT_PIN2, HIGH);       // turns on an LED that corresponds to "PARIS "
+          Serial.println("yay");
+        } else if (message == "FAIR ") {         // checks for if the message matches "K "
+          digitalWrite(OUTPUT_PIN3, HIGH);       // turns on an LED that corresponds to "K "
+          Serial.println("what?");
         }
         
         Serial.print(message);                // prints the message to the serial
@@ -184,38 +194,46 @@ void setup() {
   // set the baud rate
   Serial.begin(9600);
   // start the listening timer
-  chrono.restart();
+  timer.restart();
 }
 
 /*****************************************************/
 /*                 Loop Function                     */
 /*****************************************************/
 void loop() {
+
+  digitalWrite(OUTPUT_PIN1, HIGH);
+  
   MorseDecoder md;
   
   // reads the photoresistor data and assigns it to sensorValue
   sensorValue = analogRead(photoPin);
-//    Serial.println(sensorValue);
-    digitalWrite(13, HIGH);
 
   /* if the light passes the threshold for being on, set lightState to true
    * if it doesn't, set it to false */
-  if (sensorValue > sensorHigh) {
+  if (sensorValue > sensorThreshold) {
     lightState = true;
-  } else if (sensorValue < sensorLow) {
+  } else if (sensorValue < sensorThreshold) {
     lightState = false;
   }
 
   /* if the light changed and just turned on, then read the darkness between characters
    * if the light changed and just turned off, then read the light for characters */
   if (lightState != prevLightState && lightState == true) {
+    if (timer.elapsed() > INTER_WORD_LENGTH*2) {
+      timer.restart();
+    }
     md.readDark();
+    timer.restart();
   } else if (lightState != prevLightState && lightState == false) {
     md.readLight();
-  } else if (chrono.elapsed() == INTER_WORD_LENGTH*1.5) {
+    timer.restart();
+  } else if (timer.elapsed() == INTER_WORD_LENGTH*2) {
     if (message != "") {
+      Serial.print("hello");
       md.nextWord();    // if we haven't heard a signal in a bit and have a message, run the function to process the full word into Ascii
     }
+    timer.restart();
   }
   
   prevLightState = lightState;
